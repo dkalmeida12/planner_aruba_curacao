@@ -1,0 +1,19 @@
+{
+  "name": "Planner Aruba + Curaçao · Novembro 2026",
+  "short_name": "Aruba + Curaçao",
+  "description": "Planner familiar da viagem Aruba + Curaçao, com roteiro, orçamento, reservas, checklists e sincronização.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f7f6",
+  "theme_color": "#087f8c",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
