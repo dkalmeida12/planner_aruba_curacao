@@ -1,145 +1,121 @@
 (() => {
   'use strict';
 
-  const MAP = {
-    hotelCurValue: {cost:'costHotelCur', legacy:'cHotelCur', status:'hotel-cur'},
-    hotelAruValue: {cost:'costHotelAru', legacy:'cHotelAru', status:'hotel-aru'},
-    carCurValue:   {cost:'costCarCur',   legacy:'cCarCur',   status:'car-cur'},
-    carAruValue:   {cost:'costCarAru',   legacy:'cCarAru',   status:'car-aru'}
+  const PLAN = {
+    hotelCur: {label:'🏨 Hospedagem Curaçao', estimate:4800, valueId:'hotelCurValue', status:'hotel-cur', legacy:'cHotelCur'},
+    hotelAru: {label:'🏨 Hospedagem Aruba', estimate:2600, valueId:'hotelAruValue', status:'hotel-aru', legacy:'cHotelAru'},
+    carCur:   {label:'🚗 Carro Curaçao',       estimate:2100, valueId:'carCurValue',   status:'car-cur',   legacy:'cCarCur'},
+    carAru:   {label:'🚗 Carro Aruba',         estimate:1200, valueId:'carAruValue',   status:'car-aru',   legacy:'cCarAru'},
+    fuel:     {label:'⛽ Combustível',          estimate:600,  fieldId:'cFuel'},
+    market:   {label:'🛒 Supermercado',        estimate:1150, fieldId:'cMarket'},
+    food:     {label:'🍽 Restaurantes',        estimate:3150, fieldId:'cRestaurants'},
+    tours:    {label:'🎯 Passeios',            estimate:1300, fieldId:'cTours'},
+    fees:     {label:'🧾 Taxas / estacionamento',estimate:500,fieldId:'cFees'},
+    reserve:  {label:'🛟 Imprevistos',          estimate:1500, fieldId:'cContingency'}
   };
-  const COST_TO_RES = Object.fromEntries(Object.entries(MAP).map(([res,m])=>[m.cost,res]));
-  const CANONICAL_COSTS = ['costHotelCur','costHotelAru','costCarCur','costCarAru','cFuel','cMarket','cRestaurants','cTours','cFees','cContingency'];
+  const LAND_TARGET=20000;
+  const $=id=>document.getElementById(id);
+  const money=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  const val=id=>Number((($(id)||{}).value)||0);
+  const statusOf=key=>{try{return STATE.status[key]||'pend'}catch(_){return 'pend'}};
 
-  function $(id){ return document.getElementById(id); }
-  function n(id){ return Number(($(id) && $(id).value) || 0); }
-  function money(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
-
-  // Campos legados continuam existindo apenas por compatibilidade com a planilha,
-  // mas nunca entram diretamente no cálculo visual.
-  ['cHotelCur','cHotelAru','cCarCur','cCarAru'].forEach(id => {
-    const el=$(id); if(!el) return;
-    el.classList.remove('landcost');
-    const f=el.closest('.field'); if(f) f.style.display='none';
-  });
-
-  function syncReservationToBudget(resId){
-    const m=MAP[resId], res=$(resId); if(!m || !res) return;
-    const value=res.value;
-    if($(m.cost)) $(m.cost).value=value;
-    if($(m.legacy)) $(m.legacy).value=value;
+  function closed(item){
+    if(!item.valueId || statusOf(item.status)!=='ok') return null;
+    const v=val(item.valueId);
+    return Number.isFinite(v)&&v>=0?v:null;
   }
-  function syncBudgetToReservation(costId){
-    const resId=COST_TO_RES[costId], cost=$(costId); if(!resId || !cost) return;
-    const m=MAP[resId];
-    if($(resId)) $(resId).value=cost.value;
-    if(m && $(m.legacy)) $(m.legacy).value=cost.value;
-  }
-  function normalizeAll(){
-    Object.keys(MAP).forEach(resId => {
-      const m=MAP[resId];
-      // Preferir o valor de reserva quando preenchido; caso contrário usar o orçamento.
-      if($(resId) && $(resId).value!=='') syncReservationToBudget(resId);
-      else if($(m.cost)) syncBudgetToReservation(m.cost);
-    });
+  function projected(item){const c=closed(item);return c===null?item.estimate:c}
+  function allItems(){return Object.values(PLAN)}
+  function baseTotal(){return allItems().reduce((s,x)=>s+x.estimate,0)}
+  function projectionTotal(){return allItems().reduce((s,x)=>s+projected(x),0)}
+  function confirmedTotal(){return allItems().reduce((s,x)=>{const c=closed(x);return s+(c===null?0:c)},0)}
+
+  // A aba Custos é exclusivamente um painel: nada editável.
+  function buildCostsPanel(){
+    const tab=$('tab-custos'); if(!tab) return;
+    tab.innerHTML=`<div class="card"><div class="card-head"><div class="eyebrow">Orçamento terrestre</div><h2>Planejado × fechado</h2><div class="sub">Os valores fechados vêm automaticamente das reservas confirmadas em Curaçao e Aruba.</div></div><div class="card-body"><div class="metrics"><div class="metric"><small>Planejado</small><b id="costBaseTotal">—</b></div><div class="metric"><small>Projeção atual</small><b id="costProjectionTotal">—</b></div><div class="metric"><small>Já fechado</small><b id="costClosedTotal">—</b></div><div class="metric"><small>Margem até R$ 20 mil</small><b id="costMargin">—</b></div></div><div id="costRows" style="margin-top:10px"></div><div class="total-row"><span>Projeção terrestre</span><strong id="landTotal2">—</strong></div><div class="tip" style="margin-top:10px">Enquanto uma reserva estiver pendente, a projeção usa o valor planejado. Ao confirmar, o valor real informado substitui automaticamente a estimativa.</div></div></div>`;
   }
 
-  // Cálculo canônico: exatamente dez categorias, sem depender de classes duplicadas.
-  window.calc = function(){
-    const costs=CANONICAL_COSTS.map(id=>$(id)).filter(Boolean);
-    const land=costs.reduce((s,e)=>s+Number(e.value||0),0);
-    const air=n('airTotal'), grand=land+air, pct=land/20000*100, margin=20000-land;
-    if($('grandTotal')) $('grandTotal').textContent=money(grand);
-    if($('airHero')) $('airHero').textContent=money(air);
-    if($('landHero')) $('landHero').textContent=money(land);
-    if($('landMetric')) $('landMetric').textContent=money(land);
-    if($('landTotal2')) $('landTotal2').textContent=money(land);
-    if($('landProg')) $('landProg').style.width=Math.min(100,Math.max(0,pct))+'%';
-    if($('landPct')) $('landPct').textContent=pct.toFixed(1).replace('.',',')+'% consumido';
-    if($('landRemain')) $('landRemain').textContent=money(margin);
-    if($('landBadge')) $('landBadge').textContent='Terrestre '+pct.toFixed(1).replace('.',',')+'%';
-    const conf=Object.values(window.STATE||STATE||{}).filter?0:0;
+  function renderCostsPanel(){
+    const root=$('costRows'); if(!root) return;
+    root.innerHTML=allItems().map(item=>{
+      const c=closed(item), p=projected(item), diff=c===null?null:c-item.estimate;
+      const closedTxt=c===null?'—':money(c);
+      let diffTxt='';
+      if(diff!==null){diffTxt=diff===0?'sem diferença':diff<0?`${money(Math.abs(diff))} abaixo`:`${money(diff)} acima`}
+      const badge=c===null?(item.valueId?'Pendente':'Estimativa'):'✓ Fechado';
+      return `<div class="cost-row" style="grid-template-columns:1fr minmax(190px,auto)"><div><label>${item.label}</label><small>${badge}${diffTxt?' · '+diffTxt:''}</small></div><div style="text-align:right"><div style="font-size:10px;color:var(--muted)">Estimado ${money(item.estimate)}</div><strong style="display:block;font-size:13px">Fechado ${closedTxt}</strong><div style="font-size:10px;color:var(--muted)">Projeção ${money(p)}</div></div></div>`;
+    }).join('');
+    const base=baseTotal(), proj=projectionTotal(), ct=confirmedTotal();
+    if($('costBaseTotal'))$('costBaseTotal').textContent=money(base);
+    if($('costProjectionTotal'))$('costProjectionTotal').textContent=money(proj);
+    if($('costClosedTotal'))$('costClosedTotal').textContent=money(ct);
+    if($('costMargin'))$('costMargin').textContent=money(LAND_TARGET-proj);
+    if($('landTotal2'))$('landTotal2').textContent=money(proj);
+  }
+
+  // Recalcula o Panorama pela projeção: fechado substitui estimado apenas quando confirmado.
+  window.calc=function(){
+    const land=projectionTotal(), air=val('airTotal'), grand=land+air, pct=land/LAND_TARGET*100, margin=LAND_TARGET-land;
+    if($('grandTotal'))$('grandTotal').textContent=money(grand);
+    if($('airHero'))$('airHero').textContent=money(air);
+    if($('landHero'))$('landHero').textContent=money(land);
+    if($('landMetric'))$('landMetric').textContent=money(land);
+    if($('landProg'))$('landProg').style.width=Math.min(100,Math.max(0,pct))+'%';
+    if($('landPct'))$('landPct').textContent=pct.toFixed(1).replace('.',',')+'% consumido';
+    if($('landRemain'))$('landRemain').textContent=money(margin);
+    if($('landBadge'))$('landBadge').textContent='Terrestre '+pct.toFixed(1).replace('.',',')+'%';
     try{
       const c=Object.values(STATE.status||{}).filter(v=>v==='ok').length;
       const p=Object.values(STATE.status||{}).filter(v=>v==='pend').length;
-      if($('confirmedHero')) $('confirmedHero').textContent=c;
-      if($('pendingHero')) $('pendingHero').textContent=p;
+      if($('confirmedHero'))$('confirmedHero').textContent=c;
+      if($('pendingHero'))$('pendingHero').textContent=p;
     }catch(_){ }
-    if($('sumLodging')) $('sumLodging').textContent=money(n('costHotelCur')+n('costHotelAru'));
-    if($('sumCars')) $('sumCars').textContent=money(n('costCarCur')+n('costCarAru')+n('cFuel'));
-    if($('sumFood')) $('sumFood').textContent=money(n('cMarket')+n('cRestaurants'));
-    if($('sumTours')) $('sumTours').textContent=money(n('cTours'));
+    if($('sumLodging'))$('sumLodging').textContent=money(projected(PLAN.hotelCur)+projected(PLAN.hotelAru));
+    if($('sumCars'))$('sumCars').textContent=money(projected(PLAN.carCur)+projected(PLAN.carAru)+PLAN.fuel.estimate);
+    if($('sumFood'))$('sumFood').textContent=money(PLAN.market.estimate+PLAN.food.estimate);
+    if($('sumTours'))$('sumTours').textContent=money(PLAN.tours.estimate);
     if($('budgetAdvice')){
-      $('budgetAdvice').textContent=land<=19000&&land>=18000?`Estimativa dentro da faixa ideal. Margem até R$ 20 mil: ${money(margin)}.`:land<=20000?`Ainda dentro do teto terrestre. Margem: ${money(margin)}.`:`Orçamento terrestre excedido em ${money(Math.abs(margin))}.`;
-      $('budgetAdvice').className=land<=19000?'tip':land<=20000?'warn':'error';
+      $('budgetAdvice').textContent=land<=19000&&land>=18000?`Projeção dentro da faixa ideal. Margem até R$ 20 mil: ${money(margin)}.`:land<=LAND_TARGET?`Projeção dentro do teto terrestre. Margem: ${money(margin)}.`:`Projeção terrestre excedida em ${money(Math.abs(margin))}.`;
+      $('budgetAdvice').className=land<=19000?'tip':land<=LAND_TARGET?'warn':'error';
     }
-    if($('airAdvice')){
-      const d=n('airCap')-air;
-      $('airAdvice').textContent=d>=0?`Passagens estão ${money(d)} abaixo do teto aéreo.`:`Passagens estão ${money(Math.abs(d))} acima do teto.`;
-      $('airAdvice').className=d>=0?'info':'warn';
-    }
-    if($('panCategories')){
-      $('panCategories').innerHTML=costs.map(e=>`<div class="row"><span>${e.dataset.cat||e.id}</span><strong>${money(e.value)}</strong></div>`).join('')+`<div class="total-row"><span>Total terrestre</span><strong>${money(land)}</strong></div>`;
-    }
+    if($('airAdvice')){const d=val('airCap')-air;$('airAdvice').textContent=d>=0?`Passagens estão ${money(d)} abaixo do teto aéreo.`:`Passagens estão ${money(Math.abs(d))} acima do teto.`;$('airAdvice').className=d>=0?'info':'warn'}
+    if($('panCategories'))$('panCategories').innerHTML=allItems().map(item=>{const c=closed(item);return `<div class="row"><span>${item.label}${c!==null?' ✓':''}</span><strong>${money(projected(item))}</strong></div>`}).join('')+`<div class="total-row"><span>Projeção terrestre</span><strong>${money(land)}</strong></div>`;
+    renderCostsPanel();
   };
 
-  // Tornar o JSON salvo coerente com a fonte única de verdade.
+  // Garante compatibilidade com o backend/RESUMO sem expor campos editáveis ao usuário.
   if(typeof window.collect==='function'){
-    const baseCollect=window.collect;
+    const originalCollect=window.collect;
     window.collect=function(stamp=true){
-      normalizeAll();
-      const d=baseCollect(stamp);
-      d.fields=d.fields||{};
-      Object.entries(MAP).forEach(([resId,m])=>{
-        const value=$(m.cost)?$(m.cost).value:($(resId)?$(resId).value:'');
-        d.fields[resId]=value;
-        d.fields[m.cost]=value;
-        d.fields[m.legacy]=value;
+      const d=originalCollect(stamp);d.fields=d.fields||{};
+      Object.values(PLAN).forEach(item=>{
+        if(item.legacy)d.fields[item.legacy]=String(projected(item));
+        if(item.fieldId)d.fields[item.fieldId]=String(item.estimate);
       });
       return d;
     };
   }
 
-  // Após baixar dados antigos da nuvem, normalizar antes de recalcular.
+  // Depois de carregar local/nuvem, não aceitar antigos campos de custo como fonte da projeção.
   if(typeof window.applyData==='function'){
-    const baseApply=window.applyData;
-    window.applyData=function(d){
-      baseApply(d);
-      normalizeAll();
-      window.calc();
-    };
+    const originalApply=window.applyData;
+    window.applyData=function(d){originalApply(d);window.calc()};
   }
 
-  // Digitar o valor real da reserva atualiza orçamento/panorama imediatamente.
-  Object.keys(MAP).forEach(resId=>{
-    const el=$(resId); if(!el) return;
-    ['input','change'].forEach(ev=>el.addEventListener(ev,()=>{
-      syncReservationToBudget(resId);
-      window.calc();
-    },true));
-  });
-  Object.keys(COST_TO_RES).forEach(costId=>{
-    const el=$(costId); if(!el) return;
-    ['input','change'].forEach(ev=>el.addEventListener(ev,()=>{
-      syncBudgetToReservation(costId);
-      window.calc();
-    },true));
+  // Mudança no valor da reserva só afeta a projeção se ela já estiver confirmada.
+  ['hotelCurValue','hotelAruValue','carCurValue','carAruValue'].forEach(id=>{
+    const e=$(id);if(!e)return;
+    e.addEventListener('input',()=>window.calc(),true);
+    e.addEventListener('change',()=>window.calc(),true);
   });
 
-  // Confirmar uma hospedagem/carro força o valor real para a categoria antes do autosave.
+  // Após o clique de status, a função base atualiza STATE; então recalculamos e salvamos.
   document.addEventListener('click',e=>{
-    const btn=e.target.closest('[data-status-group] button');
-    if(!btn) return;
-    const box=btn.closest('[data-status-group]');
-    const group=box && box.dataset.statusGroup;
-    const entry=Object.entries(MAP).find(([,m])=>m.status===group);
-    if(!entry) return;
-    setTimeout(()=>{
-      syncReservationToBudget(entry[0]);
-      window.calc();
-      try{ if(typeof window.queueSave==='function') window.queueSave(); }catch(_){ }
-    },0);
+    if(!e.target.closest('[data-status-group] button'))return;
+    setTimeout(()=>{window.calc();try{if(typeof window.queueSave==='function')window.queueSave()}catch(_){}},0);
   },true);
 
-  normalizeAll();
+  buildCostsPanel();
   window.calc();
 })();
