@@ -1,4 +1,4 @@
-const CACHE='planner-aruba-curacao-v4.7';
+const CACHE='planner-aruba-curacao-v4.8';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icon.svg'];
 
 self.addEventListener('install',event=>{
